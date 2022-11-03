@@ -3,17 +3,17 @@
 #include <PubSubClient.h>
 
 //************************Datos de Wifi***********************//
-const char* ssid = "Jessica2.4";
-const char* password = "167832873";
+const char* ssid = "";
+const char* password = "";
 
 //************************Datos de Brocker***********************//
 
-const char* mqtt_server = "node02.myqtthub.com";
-const char* id = "ESP2";
-const char* user = "cpce1901";
-const char* codePass = "cpce.1901";
+const char* mqtt_server = "";
+const char* id = "";
+const char* user = "";
+const char* codePass = "";
 int puerto = 1883;
-const char* topicod = "machali1231/escritorio/sd1";
+const char* topicod = "";
 
 //************************Manejo de tiempos***********************//
 
