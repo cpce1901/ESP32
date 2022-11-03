@@ -3,17 +3,17 @@
 #include <PubSubClient.h>
 
 //************************Datos de Wifi***********************//
-const char* ssid = "";
-const char* password = "";
+const char* ssid = "Jessica2.4";
+const char* password = "167832873";
 
 //************************Datos de Brocker***********************//
 
-const char* mqtt_server = "";
-const char* id = "";
-const char* user = "";
-const char* codePass = "";
+const char* mqtt_server = "node02.myqtthub.com";
+const char* id = "ESP2";
+const char* user = "cpce1901";
+const char* codePass = "cpce.1901";
 int puerto = 1883;
-const char* topicod = "";
+const char* topicod = "machali1231/escritorio/sd1";
 
 //************************Manejo de tiempos***********************//
 
@@ -34,6 +34,11 @@ PubSubClient client(espClient);
 #define TXD2 22
 String dato = "";
 String envio = "";
+int int_dato = 0;
+
+//************************Filtros de medida***********************//
+
+int filtro1 = 0;
 
 //************************ Conexion Wifi ***********************//
 
@@ -97,12 +102,22 @@ void loop() {
     }
   }
 
+   if (millis() - Task_3 > 10) {      //Lectura de sensor cada 500ms
+    Task_3 = millis();
+    
+    int_dato = envio.toInt();
+    // normalizacion
+    filtro1 = filtro1 + (int_dato - filtro1) / 20.0;
+
+  }
+
   long now = millis();
   if (now - lastMsg > tiempo_envio) {
-    lastMsg = now;
+    lastMsg = now;    
 
-    char out_d[10];
-    envio.toCharArray(out_d, 10);
+    char out_d[5];
+
+    itoa(filtro1, out_d, 10);
 
     Serial.println(out_d);
 
