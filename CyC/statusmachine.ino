@@ -1,59 +1,120 @@
-#define RXD2 16
-#define TXD2 17
+#include <WiFiClient.h> 
+#include <HTTPClient.h>     
+#include <ArduinoJson.h>
+#include <WiFi.h>
 
-int pulsador = 25;
-int led = 27;
-unsigned long work_1 = 0;
-unsigned long work_2 = 0;
-String receivedData = "";
-bool bobinastatus = false;
+// URL para ingresar datos
+const char* serverName = "http://192.168.0.101:8000/lectures/api-add/";
 
-void IRAM_ATTR encenderTodas() {
-  
-}
+#define run 17
+#define statusM 16
+
+// Numero de sensor
+#define id 1
+
+bool readRunBefore = false;
+bool readStatusBefore = false;
+
+int statusMachine = 0;
+bool change = false;
+
+unsigned long currentTime = 0;
+int interval = 30;  // Intervalo de tiempo antes de envio sin actividad en segundos
 
 void setup() {
-  Serial.begin(9600);
-  Serial2.begin(115200, SERIAL_8N1, RXD2, TXD2);
-  pinMode(pulsador, INPUT_PULLUP);
-  pinMode(led, OUTPUT);
-  attachInterrupt(digitalPinToInterrupt(pulsador), encenderTodas, RISING);
+  Serial.begin(115200);
+  pinMode(run, INPUT);
+  pinMode(statusM, INPUT);
+
+  // Inicializar la conexión WiFi
+  WiFi.begin("TP-Link_7F77", "66298755");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Conectando a la red WiFi...");
+  }
+
+  Serial.println("Conexión WiFi establecida");
+
+  send(statusMachine);
 }
+
 
 void loop() {
-  if (millis() - work_1 >= 100) {
-    if (Serial2.available()) {
-      receivedData = Serial2.readStringUntil(':');
-      if (receivedData.length() > 0) {
-        int distancia = processReceivedData();
-        int bobina = map(distancia, 0, 2000, 100, 0);        
-        if (bobina <= 10) {
-          bobinastatus = false;
-        } else {
-          bobinastatus = true;
-        }
-        receivedData = "";
+  // Lectura de las entradas digitales de estado y de arranque
+  bool readRun = digitalRead(run);
+  bool readStatus = digitalRead(statusM);
+
+  // Cuenta regresiva para envio de sin actividad
+  static int cuenta = interval; 
+
+  // Identificamos el rissing and falling de la lectura statusM
+  if (readStatus != readStatusBefore) {
+    if (readStatus == HIGH) {
+      Serial.println("Status Rissing");
+      change = true;
+      statusMachine = 1;
+    } else if (readStatus == LOW) {
+      Serial.println("Status Falling");
+      change = true;
+      statusMachine = 0;
+    }
+  }
+
+  if (readRun && change) {
+    Serial.println("Enviar dato: Maquina encendida y ha habido un cambio");
+    cuenta = interval;
+    send(statusMachine);
+  }
+  // Accion cuando readRun este encendido y no haya un cambio en statusMachine
+  else if (readRun && !change) {
+    if (millis() - currentTime >= 1000) {
+      currentTime = millis();
+      cuenta--;
+      Serial.print("Maquina encendida y no ha habido un cambio");
+      Serial.print("cuenta regresiba:");
+      Serial.println(cuenta);
+      if (cuenta <= 0) {
+        Serial.print("Enviar dato: Maquina encendida y no ha habido un cambio hace 30 seg.");
+        cuenta = interval;
+        send(statusMachine);
       }
     }
-    work_1 = millis();
   }
-
-  if (millis() - work_2 >= 1000) {
-    Serial.println(bobinastatus);
-    work_2 = millis();
-    if (bobinastatus) {
-      Serial.println("Bobina cargada");
-    } else {
-      Serial.println("Bobina bajo el nivel 10%, Bobina acabada o extraida");
-    }
-  }
+  readStatusBefore = readStatus;
+  change = false;
 }
 
-int processReceivedData() {
-  int endPos = receivedData.indexOf("mm");
-  if (endPos != -1) {
-    String numericValues = receivedData.substring(1, endPos);
-    return numericValues.toInt();
+void send(int estado) {
+
+  DynamicJsonDocument jsonDoc(512);
+  jsonDoc["machine"] = id;
+  jsonDoc["status"] = estado;
+
+  String postData;
+  serializeJson(jsonDoc, postData); 
+  
+  Serial.println(postData);
+
+  if (WiFi.status() == WL_CONNECTED) {
+
+    WiFiClient client;
+    HTTPClient http;
+
+    http.begin(client, serverName);
+
+    http.addHeader("Content-Type", "application/json");
+
+    int httpResponseCode = http.POST(postData);
+
+    Serial.print("HTTP Response code: ");
+    Serial.println(httpResponseCode);
+
+    http.end();
+
+  } else {
+    Serial.println("WiFi Disconnected");
+    ESP.restart();
+    delay(500);
   }
-  return 0;
 }
