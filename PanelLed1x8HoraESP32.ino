@@ -8,7 +8,7 @@
 #define HARDWARE_TYPE MD_MAX72XX::FC16_HW
 //#define HARDWARE_TYPE MD_MAX72XX::GENERIC_H
 
-#define MAX_DEVICES 8
+#define MAX_DEVICES 4
 #define CLK_PIN 18
 #define DATA_PIN 23
 #define CS_PIN 5
@@ -50,24 +50,18 @@ void loop() {
 }
 
 void obtainTime() {
-  while (!timeClient.update()) {
-    timeClient.forceUpdate();
-  }
+  timeClient.update();
 
   currentMillis = millis();
 
   if (currentMillis - previousMillis > interval) {
-    previousMillis = millis();
+    previousMillis = millis();    
 
-    Formatted_date = timeClient.getFormattedDate();
-    Serial.println(Formatted_date);
+    hour = timeClient.getHours();
+    minute = timeClient.getMinutes();
+    seconds = timeClient.getSeconds();
 
-    hour = Formatted_date.substring(11, 13);
-    minute = Formatted_date.substring(14, 16);
-    seconds = Formatted_date.substring(17, 19);
-
-
-    Time = hour + ":" + minute + ":" + seconds;
+    Time = hour + ":" + minute;
     Serial.println(Time);
     Display.setTextAlignment(PA_CENTER);
     Display.print(Time);
