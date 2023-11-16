@@ -20,8 +20,8 @@ const char* sensor4 = "4";
 const char* sensor5 = "5";
 
 //************************Datos de Wifi***********************//
-const char* ssid = "Jessica2.4";
-const char* password = "167832873";
+const char* ssid = "DemoColegio2.4";
+const char* password = "democolegio2.4";
 
 //************************Datos de Brocker***********************//
 
@@ -38,9 +38,9 @@ const char* endpoint = "http://164.92.64.11/lectures/add/";
 
 //************************ Definimos pines indicadores LED ***********************//
 
-#define led_conectado_wifi 5
-#define led_conectado_mqtt 23
-#define led_envio 19  //19 pin led salida 2 pin interno led
+#define led_conectado_on 23    // 5 color blanco
+#define led_conectado_wifi 5   // 23 color rojo
+#define led_conectado_mqtt 19  // 19 color azul
 
 //************************ Definimos pines salida Rele ***********************//
 
@@ -48,17 +48,19 @@ const char* endpoint = "http://164.92.64.11/lectures/add/";
 
 //************************ Definimos pines puerto Serie2 ***********************//
 
+// Placa trabaja 17 - 16
 #define RXD2 17
 #define TXD2 16
 
 //************************ Tiempos de envio ***********************//
 
 unsigned short tiempo_lecturas = 500;        // Tiempo entre cada envio
-unsigned short tiempo_envio_mqtt = 1500;     // Tiempo entre cada lectura
+unsigned short tiempo_envio_mqtt = 3000;     // Tiempo entre cada lectura
 unsigned int tiempo_envio_endpoint = 60000;  // Tiempo entre cada lectura
 
 //************************ Tiempos de tareas ***********************//
 
+unsigned long Task_0 = 0;
 unsigned long Task_1 = 0;
 unsigned long Task_2 = 0;
 unsigned long Task_3 = 0;
@@ -97,18 +99,19 @@ bool active_sensor3 = false;
 bool active_sensor4 = false;
 bool active_sensor5 = false;
 
+short count_reset = 0;
+short limit_reset = 60;
+
 //************************ Funcion Conexion Wifi ***********************//
 
 void setup_wifi() {
   delay(10);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
-    digitalWrite(led_conectado_wifi, LOW);
     Serial.print(".");
     delay(500);
   }
   Serial.println("OK, Estamos conectado en WIFI");
-  digitalWrite(led_conectado_wifi, HIGH);
 }
 
 //************************ Reconect Broker MQTT ***********************//
@@ -118,12 +121,19 @@ void reconnect() {
     Serial.println("Intentando concetar con servidor MQTT...");
     if (client.connect(id, user, codePass)) {
       Serial.println("connectado a Broker");
-      digitalWrite(led_conectado_mqtt, HIGH);
     } else {
-      digitalWrite(led_conectado_mqtt, LOW);
       Serial.print("Falla, Estado: ");
       Serial.print(client.state());
-      delay(250);
+      Serial.print("contando hasta....");
+      Serial.print(limit_reset);
+      Serial.print("Contando....");
+      Serial.println(count_reset);
+      if (count_reset >= limit_reset) {
+        ESP.restart();
+      } else {
+        count_reset++;
+        delay(50);
+      }
     }
   }
 }
@@ -131,15 +141,18 @@ void reconnect() {
 bool detectDevice(ModbusMaster& node, int address) {
   uint16_t dummyData;
   uint8_t result = node.readHoldingRegisters(0, 1);
+  delay(200);
   return (result == node.ku8MBSuccess);
 }
 
 void setup() {
 
+  pinMode(led_conectado_on, OUTPUT);
   pinMode(led_conectado_wifi, OUTPUT);
   pinMode(led_conectado_mqtt, OUTPUT);
-  pinMode(led_envio, OUTPUT);
   pinMode(rele_out, OUTPUT);
+
+  digitalWrite(led_conectado_on, HIGH);  // Encendemos led para arranque
 
   Serial.begin(115200);
   Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
@@ -191,12 +204,29 @@ void setup() {
 
 void loop() {
 
+  //************************ Trabajo 1 Verifica si esta conectado WIFI ***********************//
+  if (millis() - Task_0 >= 2000) {
+    Task_0 = millis();
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("Reconectando to WiFi...");
+      WiFi.disconnect();
+      WiFi.reconnect();
+      digitalWrite(led_conectado_wifi, LOW);
+      digitalWrite(led_conectado_mqtt, LOW);
+      reconnect();
+    } else {
+      digitalWrite(led_conectado_wifi, HIGH);
+    }
+  }
+
   //************************ Trabajo 1 Verifica si esta conectado al broker MQTT ***********************//
-  if (millis() - Task_1 >= 10) {
+  if (millis() - Task_1 >= 100) {
     Task_1 = millis();
     if (!client.connected()) {
+      digitalWrite(led_conectado_mqtt, LOW);
       reconnect();
     }
+    digitalWrite(led_conectado_mqtt, HIGH);
     client.loop();
   }
 
@@ -296,23 +326,23 @@ void loop() {
     }
 
     // Evalúa si send_2_mqtt es verdadero y el temporizador no ha comenzado
-    if (send_1_mqtt && send_2_mqtt && send_3_mqtt && send_4_mqtt && send_5_mqtt && !ledIsOn) {
-      digitalWrite(led_envio, HIGH);  // Enciende el LED
-      ledIsOn = true;                 // Marca el LED como encendido
-      led_start_time = millis();      // Registra el tiempo de inicio
-      Serial.println("Envio MQTT exitoso");
-    }
+    //if ((send_1_mqtt || send_2_mqtt || send_3_mqtt || send_4_mqtt || send_5_mqtt) && !ledIsOn) {
+    //digitalWrite(led_envio, HIGH);  // Enciende el LED
+    //ledIsOn = true;                 // Marca el LED como encendido
+    //led_start_time = millis();      // Registra el tiempo de inicio
+    //Serial.println("Envio MQTT exitoso");
+    //}
 
     // Si el temporizador ha comenzado y ha pasado el tiempo deseado
-    if (ledIsOn && (millis() - led_start_time >= 500)) {
-      digitalWrite(led_envio, LOW);  // Apaga el LED
-      ledIsOn = false;               // Marca el LED como apagado
-      send_1_mqtt = false;
-      send_2_mqtt = false;
-      send_3_mqtt = false;
-      send_4_mqtt = false;
-      send_5_mqtt = false;
-    }
+    //if (ledIsOn && (millis() - led_start_time >= 500)) {
+    //digitalWrite(led_envio, LOW);  // Apaga el LED
+    //ledIsOn = false;               // Marca el LED como apagado
+    //send_1_mqtt = false;
+    //send_2_mqtt = false;
+    //send_3_mqtt = false;
+    //send_4_mqtt = false;
+    //send_5_mqtt = false;
+    //}
   }
 
   //************************ Trabajo 3 Envio a Endpoint ***********************//
@@ -339,25 +369,33 @@ void loop() {
 
 void readSensor(ModbusMaster& node, DynamicJsonDocument& jsonDoc, short number) {
 
-  float v1 = readOneRegister(node, 0) * 0.01;
-  float v2 = readOneRegister(node, 1) * 0.01;
-  float v3 = readOneRegister(node, 2) * 0.01;
+  float v1 = readOneRegister(node, 0) * 0.01;  //OK
+  float v2 = readOneRegister(node, 1) * 0.01;  //OK
+  float v3 = readOneRegister(node, 2) * 0.01;  //OK
 
-  float v12 = readOneRegister(node, 103) * 0.01;
-  float v23 = readOneRegister(node, 104) * 0.01;
-  float v13 = readOneRegister(node, 105) * 0.01;
+  float v12 = readOneRegister(node, 103) * 0.01;  //OK
+  float v23 = readOneRegister(node, 104) * 0.01;  //OK
+  float v13 = readOneRegister(node, 105) * 0.01;  //OK
 
-  float i1 = readOneRegister(node, 3) * 0.001;
-  float i2 = readOneRegister(node, 5) * 0.001;
-  float i3 = readOneRegister(node, 7) * 0.001;
+  unsigned long i1 = readTwoRegister(node, 3);
+  float i1_float = i1 * 0.001;
+  unsigned long i2 = readTwoRegister(node, 5);
+  float i2_float = i2 * 0.001;
+  unsigned long i3 = readTwoRegister(node, 7);
+  float i3_float = i3 * 0.001;
 
-  float p1 = readOneRegister(node, 116) * 0.1;
-  float p2 = readOneRegister(node, 118) * 0.1;
-  float p3 = readOneRegister(node, 120) * 0.1;
+  long int p1 = readTwoRegister(node, 17);
+  float p1_float = (p1 * 0.1) / 1000.0;
+  long int p2 = readTwoRegister(node, 19);
+  float p2_float = (p2 * 0.1) / 1000.0;
+  long int p3 = readTwoRegister(node, 21);
+  float p3_float = (p3 * 0.1) / 1000.0;
 
-  float pa = readOneRegister(node, 14) * 0.01;
+  unsigned long pa = readOneRegister(node, 13);
+  float pa_float = pa * 0.1;
+
   float fp = readOneRegister(node, 10) * 0.001;
-  float hz = readOneRegister(node, 9) * 0.01;
+  float hz = readOneRegister(node, 9) * 0.01;  //OK
 
   Serial.print(v1);
   Serial.print(" - ");
@@ -371,19 +409,19 @@ void readSensor(ModbusMaster& node, DynamicJsonDocument& jsonDoc, short number) 
   Serial.print(" - ");
   Serial.print(v23);
   Serial.print(" - ");
-  Serial.print(i1);
+  Serial.print(i1_float);
   Serial.print(" - ");
-  Serial.print(i2);
+  Serial.print(i2_float);
   Serial.print(" - ");
-  Serial.print(i3);
+  Serial.print(i3_float);
   Serial.print(" - ");
-  Serial.print(p1);
+  Serial.print(p1_float);
   Serial.print(" - ");
-  Serial.print(p2);
+  Serial.print(p2_float);
   Serial.print(" - ");
-  Serial.print(p3);
+  Serial.print(p3_float);
   Serial.print(" - ");
-  Serial.print(pa);
+  Serial.print(pa_float);
   Serial.print(" - ");
   Serial.print(fp);
   Serial.print(" - ");
@@ -399,13 +437,13 @@ void readSensor(ModbusMaster& node, DynamicJsonDocument& jsonDoc, short number) 
   char out_v13[8];
   char out_v23[8];
 
-  char out_i1[8];
-  char out_i2[8];
-  char out_i3[8];
+  char out_i1[32];
+  char out_i2[32];
+  char out_i3[32];
 
-  char out_p1[8];
-  char out_p2[8];
-  char out_p3[8];
+  char out_p1[32];
+  char out_p2[32];
+  char out_p3[32];
 
   char out_hz[8];
   char out_pa[32];
@@ -420,17 +458,17 @@ void readSensor(ModbusMaster& node, DynamicJsonDocument& jsonDoc, short number) 
   dtostrf(v13, 3, 1, out_v13);
   dtostrf(v23, 3, 1, out_v23);
 
-  dtostrf(i1, 3, 1, out_i1);
-  dtostrf(i2, 3, 1, out_i2);
-  dtostrf(i3, 3, 1, out_i3);
+  dtostrf(i1_float, 3, 1, out_i1);
+  dtostrf(i2_float, 3, 1, out_i2);
+  dtostrf(i3_float, 3, 1, out_i3);
 
-  dtostrf(p1, 3, 1, out_p1);
-  dtostrf(p2, 3, 1, out_p2);
-  dtostrf(p3, 3, 1, out_p3);
+  dtostrf(p1_float, 3, 1, out_p1);
+  dtostrf(p2_float, 3, 1, out_p2);
+  dtostrf(p3_float, 3, 1, out_p3);
 
   dtostrf(hz, 3, 1, out_hz);
-  dtostrf(pa, 3, 1, out_pa);
-  dtostrf(fp, 3, 1, out_fp);
+  dtostrf(pa_float, 3, 1, out_pa);
+  dtostrf(fp, 3, 2, out_fp);
 
   jsonDoc["v1"] = out_v1;
   jsonDoc["v2"] = out_v2;
@@ -481,14 +519,19 @@ int readOneRegister(ModbusMaster& node, int Reg) {
 long int readTwoRegister(ModbusMaster nodo, int Reg) {
   uint8_t result;
   result = nodo.readHoldingRegisters(Reg, 2);
+  delay(100);
   if (result == nodo.ku8MBSuccess) {
     uint16_t a, b;
-    uint32_t c;
-    unsigned long salida;
     a = nodo.getResponseBuffer(0);
     b = nodo.getResponseBuffer(1);
-    c = a << 16 | b;   // Los unimos para obtener un entero sin signo de 32bits.
-    salida = (long)c;  // Convierto el entero sin signo a long (con signo)
+
+    // Intercambiar el orden de los bytes
+    a = __builtin_bswap16(a);
+    b = __builtin_bswap16(b);
+
+    unsigned long salida;
+    salida = static_cast<unsigned long>(b) << 16 | a;
     return salida;
   }
 }
+
