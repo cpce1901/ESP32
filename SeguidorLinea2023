@@ -1,0 +1,96 @@
+#include <QTRSensors.h>
+
+#define NUM_SENSORS 8
+#define IR 13
+#define MOTOR_LEFT 5
+#define MOTOR_RIGHT 6
+#define VEL_CRUCERO 80
+
+#define KP 1.25 //0.03OK - 0.085 - 0.12 -0.24 - 0.02
+#define KI 0.25 //0.09 - 0.15 - 0.3 - 0.55 - 0.8 - 0.75OK - 0.7 -
+#define KD 0.6 //0.005 - 0.008 - 0.001 -0.0005 - 0.0001 - 0.00005
+
+int last_error = 0;
+float vel;
+int P = 0;
+int I = 0;
+int D = 0;
+
+QTRSensors qtr;
+
+const uint8_t SensorCount = NUM_SENSORS;
+uint16_t sensorValues[SensorCount];
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(IR, OUTPUT);
+  pinMode(MOTOR_LEFT, OUTPUT);
+  pinMode(MOTOR_RIGHT, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  // configure the sensors
+  qtr.setTypeAnalog();
+  qtr.setSensorPins((const uint8_t[]) {
+    A0, A1, A2, A3, A4, A5, A6, A7
+  }, SensorCount);
+  qtr.setEmitterPin(IR);
+
+  delay(500);
+  digitalWrite(LED_BUILTIN, HIGH);
+  for (uint16_t i = 0; i < 100; i++) {
+    qtr.calibrate();
+  }
+  digitalWrite(LED_BUILTIN, LOW);
+
+  // print the calibration minimum values measured when emitters were on
+  for (uint8_t i = 0; i < SensorCount; i++) {
+    Serial.print(qtr.calibrationOn.minimum[i]);
+    Serial.print(' ');
+  }
+  Serial.println();
+
+  // print the calibration maximum values measured when emitters were on
+  for (uint8_t i = 0; i < SensorCount; i++) {
+    Serial.print(qtr.calibrationOn.maximum[i]);
+    Serial.print(' ');
+  }
+  Serial.println();
+  Serial.println();
+  delay(1000);
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(1000);
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(1000);
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(3000);
+  digitalWrite(LED_BUILTIN, LOW);
+}
+
+void loop() {
+  uint16_t position = qtr.readLineWhite(sensorValues); //0 - 7000
+
+  P = (abs(position) - 3500);
+
+
+  D = (P - last_error);
+  I = (P + last_error);
+
+  vel = (P * KP) + (D * KD) + abs(I * KD);  // Corregir la expresión
+
+  // Ajustar la velocidad de los motores basada en 'vel'
+  int motorSpeedLeft = VEL_CRUCERO + vel;
+  int motorSpeedRight = VEL_CRUCERO - vel;
+
+  // Limitar la velocidad a VEL_CRUCERO si excede ese valor
+  motorSpeedLeft = constrain(motorSpeedLeft, 0, VEL_CRUCERO);
+  motorSpeedRight = constrain(motorSpeedRight, 0, VEL_CRUCERO);
+
+
+
+  analogWrite(MOTOR_LEFT, motorSpeedLeft);
+  analogWrite(MOTOR_RIGHT, motorSpeedRight);
+  last_error = P;  // Actualizar el error anterior para la próxima iteración
+
+
+
+}
