@@ -16,9 +16,10 @@ const char* id = "Esp32-Hands";
 const char* user = "tester";
 const char* codePass = "tester";
 int puerto = 1883;
-const char* topico = "hands/";
+const char* topico1 = "hands/";
+const char* topico2 = "color/";
 
-char _topic[50];
+String _topic;
 String _payload;
 
 WiFiClient espClient;
@@ -30,7 +31,8 @@ void reconnect() {
     Serial.println("Intentando concetar con servidor MQTT...");
     if (client.connect(id, user, codePass)) {
       Serial.println("connectado");
-      client.subscribe(topico);
+      client.subscribe(topico1);
+      client.subscribe(topico2);
     } else {
       Serial.print("Falla, Estado: ");
       Serial.print(client.state());
@@ -45,7 +47,8 @@ void callback(char* topic, byte* payload, unsigned int length) {
   for (int i = 0; i < length; i++) {
     conc_payload_ += (char)payload[i];
   }
-  strcpy(_topic, topic);
+
+  _topic = topic;
   _payload = conc_payload_;
 }
 
@@ -89,8 +92,28 @@ void loop() {
   }
   client.loop();
 
-  ws2812fx.setBrightness(_payload.toInt());
-  ws2812fx.service();
+  if (_topic == "hands/") {
+    ws2812fx.setBrightness(_payload.toInt());
+    ws2812fx.service();
+  } else if (_topic == "color/" && _payload == "1") {
+    ws2812fx.setColor(RED);
+    ws2812fx.service();
+  } else if (_topic == "color/" && _payload == "2") {
+    ws2812fx.setColor(BLUE);
+    ws2812fx.service();
+  } else if (_topic == "color/" && _payload == "3") {
+    ws2812fx.setColor(GREEN);
+    ws2812fx.service();
+  } else if (_topic == "color/" && _payload == "4") {
+    ws2812fx.setColor(WHITE);
+    ws2812fx.service();
+  } else if (_topic == "color/" && _payload == "5") {
+    ws2812fx.setColor(PURPLE);
+    ws2812fx.service();
+  } else if (_topic == "color/" && _payload == "6") {
+    ws2812fx.setColor(ORANGE);
+    ws2812fx.service();
+  }
 
   Serial.println(_payload);
 }
