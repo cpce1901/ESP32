@@ -1,8 +1,9 @@
 #include <SPIFFS.h>
 #include <DHT.h>
 #include <WiFi.h>
-#include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
+#include <WebSocketsServer.h>
+#include <ArduinoJson.h>
 
 // Configuración WiFi
 const char *ssid = "Lab4.0";
@@ -24,9 +25,10 @@ float humedad = 0;
 
 // Crear objetos AsyncWebServer y AsyncWebSocket
 AsyncWebServer server(80);
-AsyncWebSocket ws("/ws");
+WebSocketsServer websockets(81);
 
 // Definición de tareas
+TaskHandle_t Task0;
 TaskHandle_t Task1;
 TaskHandle_t Task2;
 TaskHandle_t Task3;
@@ -67,14 +69,13 @@ void setup() {
 
 
 
-  // Configurar WebSocket
-  ws.onEvent(onWsEvent);
-  server.addHandler(&ws);
-
-  // Iniciar servidor
   server.begin();
 
+  websockets.begin();
+  websockets.onEvent(webSocketEvent);
+
   // Crear tareas
+  xTaskCreatePinnedToCore(Task0code, "Task0", 10000, NULL, 1, &Task0, 1);
   xTaskCreatePinnedToCore(Task1code, "Task1", 10000, NULL, 1, &Task1, 0);
   xTaskCreatePinnedToCore(Task2code, "Task2", 10000, NULL, 1, &Task2, 1);
   xTaskCreatePinnedToCore(Task3code, "Task3", 10000, NULL, 1, &Task3, 1);
@@ -86,10 +87,25 @@ void loop() {
   // El loop principal queda vacío
 }
 
+void Task0code(void *pvParameters) {
+  for (;;) {
+    websockets.loop();
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
+}
+
 void Task1code(void *pvParameters) {
   for (;;) {
-    distancia = medirDistancia(TRIGGER_PIN, ECHO_PIN);
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    float medida = medirDistancia(TRIGGER_PIN, ECHO_PIN);
+    if (medida < 9999.0) {  // Asumiendo que 9999.0 es nuestro valor de "fuera de rango"
+      distancia = medida;
+    } else {
+      // Manejar el error, por ejemplo:
+      Serial.println("Error al medir distancia");
+      distancia = medida;
+      // Podrías optar por mantener el último valor válido de distancia
+    }
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
   }
 }
 
@@ -103,10 +119,10 @@ void Task2code(void *pvParameters) {
 
 void Task3code(void *pvParameters) {
   for (;;) {
-    String json = "{\"distancia\":" + String(distancia) + ",\"temperatura\":" + String(temperatura) + ",\"humedad\":" + String(humedad) + "}";
-    ws.textAll(json);
+    String json = "{\"distancia\":" + (distancia <= 9999.0 ? String(distancia) : "null") + ",\"temperatura\":" + (isnan(temperatura) ? "null" : String(temperatura)) + ",\"humedad\":" + (isnan(humedad) ? "null" : String(humedad)) + "}";
+    websockets.broadcastTXT(json);
     Serial.println(json);
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
 
@@ -118,15 +134,37 @@ float medirDistancia(int trigger, int echo) {
   digitalWrite(trigger, LOW);
   long duracion = pulseIn(echo, HIGH, 30000);
   if (duracion == 0) {
-    return -1;
+    return 9999.0;  // Un valor grande que indique "fuera de rango"
   }
   return duracion * 0.034 / 2.0;
 }
 
-void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
-  if (type == WS_EVT_CONNECT) {
-    Serial.println("WebSocket client connected");
-  } else if (type == WS_EVT_DISCONNECT) {
-    Serial.println("WebSocket client disconnected");
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length) {
+  switch (type) {
+    case WStype_DISCONNECTED:
+      Serial.printf("[%u] Desconectado!\n", num);
+      break;
+    case WStype_CONNECTED:
+      {
+        IPAddress ip = websockets.remoteIP(num);
+        Serial.printf("[%u] Conectado desde %d.%d.%d.%d\n", num, ip[0], ip[1], ip[2], ip[3]);
+      }
+      break;
+    case WStype_TEXT:
+      handleWebSocketMessage(num, payload, length);
+      break;
+    case WStype_BIN:
+      Serial.printf("[%u] Mensaje binario recibido\n", num);
+      break;
+  }
+}
+
+void handleWebSocketMessage(uint8_t num, uint8_t *payload, size_t length) {
+  StaticJsonDocument<200> doc;
+  DeserializationError error = deserializeJson(doc, payload, length);
+  if (error) {
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(error.c_str());
+    return;
   }
 }
