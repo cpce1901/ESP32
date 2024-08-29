@@ -1,37 +1,47 @@
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include <DHT.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
 
-// Configuración WiFi
+// WiFi configuration
 const char *ssid = "Lab4.0";
 const char *password = "arduino123";
 
-// Pines y configuración para el sensor ultrasónico US-100
+// Pins and configuration for US-100 ultrasonic sensor
 #define TRIGGER_PIN 25
 #define ECHO_PIN 26
 
-// Pines y configuración para el sensor DHT22
+// Pins and configuration for DHT22 sensor
 #define DHTPIN 14
 #define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
-// Variables para almacenar las lecturas de los sensores
+// Variables to store sensor readings
 float distancia = 0;
 float temperatura = 0;
 float humedad = 0;
 
-// Crear objetos AsyncWebServer y AsyncWebSocket
+// Create AsyncWebServer and AsyncWebSocket objects
 AsyncWebServer server(80);
 WebSocketsServer websockets(81);
 
-// Definición de tareas
+// Task definitions
 TaskHandle_t Task0;
 TaskHandle_t Task1;
 TaskHandle_t Task2;
 TaskHandle_t Task3;
+
+void listFilesInLittleFS() {
+  File root = LittleFS.open("/");
+  File file = root.openNextFile();
+  while (file) {
+    Serial.print("FILE: ");
+    Serial.println(file.name());
+    file = root.openNextFile();
+  }
+}
 
 void setup() {
   Serial.begin(115200);
@@ -41,46 +51,46 @@ void setup() {
 
   dht.begin();
 
-  // Conectar a WiFi
+  // Connect to WiFi
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
-    Serial.println("Conectando a WiFi...");
+    Serial.println("Connecting to WiFi...");
   }
   Serial.println(WiFi.localIP());
 
-  if (!SPIFFS.begin(true)) {
-    Serial.println("Error al montar SPIFFS...");
+  if (!LittleFS.begin(true)) {
+    Serial.println("Error mounting LittleFS...");
     return;
   }
 
-  // Configurar rutas del servidor web
+  listFilesInLittleFS();  // Call to list files
+
+  // Configure web server routes
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(SPIFFS, "/index.html", "text/html");
+    request->send(LittleFS, "/index.html", "text/html");
   });
 
   server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(SPIFFS, "/style.css", "text/css");
+    request->send(LittleFS, "/style.css", "text/css");
   });
 
   server.on("/script.js", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(SPIFFS, "/script.js", "application/javascript");
+    request->send(LittleFS, "/script.js", "application/javascript");
   });
-
-
 
   server.begin();
 
   websockets.begin();
   websockets.onEvent(webSocketEvent);
 
-  // Crear tareas
-  xTaskCreatePinnedToCore(Task0code, "Task0", 10000, NULL, 1, &Task0, 1);
+  // Create tasks
+  xTaskCreatePinnedToCore(Task0code, "Task0", 10000, NULL, 2, &Task0, 1);
   xTaskCreatePinnedToCore(Task1code, "Task1", 10000, NULL, 1, &Task1, 0);
   xTaskCreatePinnedToCore(Task2code, "Task2", 10000, NULL, 1, &Task2, 1);
   xTaskCreatePinnedToCore(Task3code, "Task3", 10000, NULL, 1, &Task3, 1);
 
-  Serial.println("Sistema inicializado. Esperando lecturas...");
+  Serial.println("System initialized. Waiting for readings...");
 }
 
 void loop() {
