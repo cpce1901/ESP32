@@ -3,19 +3,17 @@ window.onload = function () {
     const statusIndicator = document.getElementById('status-indicator');
     const statusText = document.getElementById('status-text');
     const ctx = document.getElementById('chart');
-    
-    // Variables para el gráfico
-    const labels = [];
-    const temperaturaData = [];
-    const humedadData = [];
+
+    const MAX_DATA_POINTS = 100;
+
     const chart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: labels,
+            labels: [],
             datasets: [
                 {
                     label: 'Humedad (%)',
-                    data: humedadData,
+                    data: [],
                     borderWidth: 1.2,
                     fill: false,
                     tension: 0,
@@ -26,7 +24,7 @@ window.onload = function () {
                 },
                 {
                     label: 'Temperatura (°C)',
-                    data: temperaturaData,
+                    data: [],
                     borderWidth: 1.2,
                     fill: false,
                     tension: 0,
@@ -49,6 +47,7 @@ window.onload = function () {
                         }
                     },
                     ticks: {
+                        maxTicksLimit: 10
                     },
                 },
                 y: {
@@ -57,6 +56,18 @@ window.onload = function () {
             }
         }
     });
+
+    function addData(label, temperatura, humedad) {
+        if (chart.data.labels.length >= MAX_DATA_POINTS) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+            chart.data.datasets[1].data.shift();
+        }
+        chart.data.labels.push(label);
+        chart.data.datasets[0].data.push(humedad);
+        chart.data.datasets[1].data.push(temperatura);
+        chart.update();
+    }
 
     function updateConnectionStatus(connected) {
         if (connected) {
@@ -86,27 +97,17 @@ window.onload = function () {
     websocket.onmessage = function (event) {
         try {
             console.log("Mensaje recibido: " + event.data);
-            // Suponemos que el mensaje es un JSON con temperatura, humedad y distancia
             const data = JSON.parse(event.data);
-            // Actualizar los valores en el HTML
+            
             document.getElementById('distancia-value').innerText = data.distancia === 9999.0 ? 'OUT RANGE' : data.distancia.toFixed(2) + ' cm';
             document.getElementById('temperatura-value').innerText = data.temperatura.toFixed(2);
             document.getElementById('humedad-value').innerText = data.humedad.toFixed(2);
-            // Añadir los nuevos datos al gráfico
+            
             const now = new Date().toLocaleTimeString();
-            labels.push(now);
-            temperaturaData.push(data.temperatura);
-            humedadData.push(data.humedad);
-            // Limitar el número de puntos en el gráfico si es necesario
-            if (labels.length > 100) {  // Por ejemplo, mantener solo los últimos 100 puntos
-                labels.shift();
-                temperaturaData.shift();
-                humedadData.shift();
-            }
-            // Actualizar el gráfico
-            chart.update();
+            addData(now, data.temperatura, data.humedad);
         } catch (error) {
             console.error("Error procesando el mensaje WebSocket: ", error);
         }
     };
 };
+
