@@ -1,9 +1,18 @@
+#define BLYNK_TEMPLATE_ID "TMPL2aLl0U7In"
+#define BLYNK_TEMPLATE_NAME "LLENADORA"
+#define BLYNK_AUTH_TOKEN "ikUPSUN8r60dN1Mh_tNVLuKeCbod9se_"
+#define BLYNK_PRINT Serial
+
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h>
 
 #define BT_EMERG 23
 #define BT_START 22
 #define BT_STOP 21
+#define BT_RESET 4
 
 #define SV101 26
 #define SV102 27
@@ -21,7 +30,12 @@
 #define SCL 16  // Pin de reloj para I2C
 #define SDA 17  // Pin de datos para I2C
 
+
 LiquidCrystal_I2C lcd(0x27, 16, 2);
+BlynkTimer timer;
+
+char ssid[] = "Wokwi-GUEST";
+char pass[] = "";
 
 // State Enumeration
 enum SystemState {
@@ -33,10 +47,34 @@ enum SystemState {
   END
 };
 
+// Control Flags Structure
+struct ControlFlags {
+  bool physicalStart = false;
+  bool physicalStop = false;
+  bool physicalEmergency = false;
+  bool physicalReset = false;
+
+  bool remoteStart = false;
+  bool remoteStop = false;
+  bool remoteEmergency = false;
+  bool remoteReset = false;
+  bool remoteResetCounter = false;
+};
+
 SystemState currentState = DETENIDO;
+ControlFlags controlFlags;
 float minTank = 30.0;
 float normalTank = 50.0;
 bool liquidEnabled = false;
+float tankPercentage = 0.0;
+String currentStateStatus = "";
+
+// KPIs
+int countBottle = 3;
+int bottleL = 20;
+bool cycleComplete = false;
+unsigned long totalCycles = 0;
+
 
 // Tareas
 TaskHandle_t TaskMonitorTank;
@@ -44,19 +82,77 @@ TaskHandle_t TaskHandleButtons;
 TaskHandle_t TaskWork;
 TaskHandle_t TaskLCDDisplay;
 
+
 void TaskMonitorTankCode(void *pvParameters);
 void TaskHandleButtonsCode(void *pvParameters);
 void TaskWorkCode(void *pvParameters);
 void TaskLCDDisplayCode(void *pvParameters);
 
+unsigned long previousTotalCycles = 0;
+String previousStateStatus = "";
+bool previousLiquidEnabled = false;
+
+void dataSend() {
+  // Verifica si el total de ciclos cambió
+  if (totalCycles != previousTotalCycles) {
+    int totalBottlePeerCycle = totalCycles * countBottle;
+    int totalLiterPeerCycle = totalBottlePeerCycle * bottleL;
+    Blynk.virtualWrite(V8, totalBottlePeerCycle);
+    Blynk.virtualWrite(V9, totalLiterPeerCycle);
+    previousTotalCycles = totalCycles;  // Actualiza el valor anterior
+  }
+
+
+  // Verifica si el estado actual cambió
+  if (currentStateStatus != previousStateStatus) {
+    Blynk.virtualWrite(V2, currentStateStatus);
+    previousStateStatus = currentStateStatus;  // Actualiza el valor anterior
+  }
+
+  // Verifica si el estado de liquidEnabled cambió
+  if (liquidEnabled != previousLiquidEnabled) {
+    Blynk.virtualWrite(V1, !liquidEnabled);
+    previousLiquidEnabled = liquidEnabled;  // Actualiza el valor anterior
+  }
+
+  // La variable del porcentaje del tanque siempre se envía, ya que es un valor continuo
+  Blynk.virtualWrite(V0, tankPercentage);
+}
+
+// Blynk Virtual Pin Handlers with Mutex-like Behavior
+BLYNK_WRITE(V4) {  // START
+  controlFlags.remoteStart = param.asInt();
+}
+
+BLYNK_WRITE(V5) {  // STOP
+  controlFlags.remoteStop = param.asInt();
+}
+
+BLYNK_WRITE(V6) {  // EMERGENCY
+  controlFlags.remoteEmergency = param.asInt();
+}
+
+BLYNK_WRITE(V7) {  // RESET
+  controlFlags.remoteReset = param.asInt();
+}
+
+BLYNK_WRITE(V10) {  // RESET COUNTER
+  controlFlags.remoteResetCounter = param.asInt();
+}
+
+
 void setup() {
   Serial.begin(115200);
+
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+
   Wire.begin(SDA, SCL);
 
   // Configure Button Pins
   pinMode(BT_EMERG, INPUT);
   pinMode(BT_START, INPUT);
   pinMode(BT_STOP, INPUT);
+  pinMode(BT_RESET, INPUT);
 
   // Configure Level and Control Pins
   pinMode(LT100, INPUT);
@@ -81,7 +177,7 @@ void setup() {
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0, 0);
-  lcd.print("System Ready");
+  lcd.print(WiFi.localIP());
   delay(2000);
   lcd.clear();
 
@@ -126,16 +222,18 @@ void setup() {
     1                    // Core to run the task
   );
 
-  Serial.println("Setup complete. System ready.");
+  timer.setInterval(5000L, dataSend);
 }
 
 void loop() {
+  Blynk.run();
+  timer.run();
 }
 
 void TaskMonitorTankCode(void *pvParameters) {
   for (;;) {
-    int tankLevel = analogRead(LT100);                       // Leer nivel del tanque (0-4095)
-    float tankPercentage = map(tankLevel, 0, 4095, 0, 100);  // Convertir a porcentaje
+    int tankLevel = analogRead(LT100);  // Leer nivel del tanque (0-4095)
+    tankPercentage = (tankLevel / 4095.0) * 100.0;
 
     // Mostrar nivel del tanque en la primera fila
     lcd.setCursor(0, 0);
@@ -151,34 +249,59 @@ void TaskMonitorTankCode(void *pvParameters) {
     }
 
 
-
     vTaskDelay(500 / portTICK_PERIOD_MS);  // Esperar 500 ms
   }
 }
 
 void TaskHandleButtonsCode(void *pvParameters) {
   for (;;) {
-    // Leer el estado de los botones
-    bool emergPressed = digitalRead(BT_EMERG);
-    bool startPressed = digitalRead(BT_START);
-    bool stopPressed = digitalRead(BT_STOP);
+    // Read physical button states
+    controlFlags.physicalEmergency = !digitalRead(BT_EMERG);
+    controlFlags.physicalStart = digitalRead(BT_START);
+    controlFlags.physicalStop = digitalRead(BT_STOP);
+    controlFlags.physicalReset = digitalRead(BT_RESET);
 
-    // Si liquidEnabled es false, el sistema debe estar en DETENIDO
+    if (controlFlags.remoteResetCounter) {
+      totalCycles = 0;
+      Blynk.virtualWrite(V8, 0);
+      Blynk.virtualWrite(V9, 0);
+    }
+
+    // Priority-based State Management
     if (!liquidEnabled) {
       currentState = DETENIDO;
-    } 
-    // Si liquidEnabled es true, proceder con los botones
-    else {
-      if (!emergPressed) {
+    } else {
+      // Emergency has the highest priority
+      if (controlFlags.physicalEmergency || controlFlags.remoteEmergency) {
         currentState = EMERGENCIA;
-      } else if (stopPressed) {
+      }
+
+      // Reset only works when in Emergency state
+      if (currentState == EMERGENCIA && (controlFlags.physicalReset || controlFlags.remoteReset)) {
         currentState = DETENIDO;
-      } else if (startPressed) {
-        currentState = START;
+        controlFlags.remoteEmergency = false;
+      }
+
+      // Only process start/stop if not in Emergency
+      if (currentState != EMERGENCIA) {
+        // Prioritize physical buttons over remote
+        if (controlFlags.physicalStop || controlFlags.remoteStop) {
+          currentState = DETENIDO;
+        } else if (controlFlags.physicalStart || controlFlags.remoteStart) {
+          currentState = START;
+        }
       }
     }
 
-    vTaskDelay(200 / portTICK_PERIOD_MS);  // Esperar 200 ms antes de revisar nuevamente
+    // Reset transient flags
+    controlFlags.physicalStart = false;
+    controlFlags.physicalStop = false;
+    controlFlags.physicalReset = false;
+    controlFlags.remoteStart = false;
+    controlFlags.remoteStop = false;
+    controlFlags.remoteReset = false;
+
+    vTaskDelay(200 / portTICK_PERIOD_MS);
   }
 }
 
@@ -193,6 +316,7 @@ void TaskWorkCode(void *pvParameters) {
         digitalWrite(SV103, LOW);
         digitalWrite(SV104, LOW);
         digitalWrite(B1, LOW);
+        cycleComplete = false;
         break;
 
       case DETENIDO:
@@ -202,6 +326,7 @@ void TaskWorkCode(void *pvParameters) {
         digitalWrite(SV103, LOW);
         digitalWrite(SV104, LOW);
         digitalWrite(B1, LOW);
+        cycleComplete = false;
         break;
 
       case START:
@@ -209,7 +334,7 @@ void TaskWorkCode(void *pvParameters) {
         digitalWrite(SV104, HIGH);
         if (digitalRead(LSW104)) {
           currentState = LLENADO;
-          vTaskDelay(1000 / portTICK_PERIOD_MS);
+          vTaskDelay(2000 / portTICK_PERIOD_MS);
         }
         break;
       case LLENADO:
@@ -217,7 +342,7 @@ void TaskWorkCode(void *pvParameters) {
         digitalWrite(SV102, HIGH);
         digitalWrite(SV103, HIGH);
         currentState = LLENANDO;
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
         break;
 
       case LLENANDO:
@@ -236,15 +361,22 @@ void TaskWorkCode(void *pvParameters) {
 
         if (digitalRead(LT101) && digitalRead(LT102) && digitalRead(LT103)) {
           currentState = END;
-          vTaskDelay(1000 / portTICK_PERIOD_MS);
+          vTaskDelay(2000 / portTICK_PERIOD_MS);
         }
         break;
 
       case END:
         digitalWrite(B1, LOW);
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
         digitalWrite(SV104, LOW);
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+        if (!cycleComplete) {
+          totalCycles++;
+          Serial.println(totalCycles);
+          cycleComplete = true;
+        }
+
         currentState = DETENIDO;
         break;
     }
@@ -260,21 +392,27 @@ void TaskLCDDisplayCode(void *pvParameters) {
       switch (currentState) {
         case EMERGENCIA:
           lcd.print("Emergencia      ");
+          currentStateStatus = "EMERGENCIA";
           break;
         case DETENIDO:
           lcd.print("Detenido        ");
+          currentStateStatus = "DETENIDO";
           break;
         case START:
           lcd.print("Iniciado        ");
+          currentStateStatus = "INICIANDO...";
           break;
         case LLENADO:
           lcd.print("Inicio Llenado  ");
+          currentStateStatus = "LLENADO...";
           break;
         case LLENANDO:
           lcd.print("Llenando...     ");
+          currentStateStatus = "LLENANDO...";
           break;
         case END:
           lcd.print("Fin Llenado     ");
+          currentStateStatus = "TERMINADO";
           break;
       }
     } else {
