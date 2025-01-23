@@ -1,11 +1,9 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <WiFiClientSecure.h>
-#include <DHT.h>
+#include <Wire.h>
+#include <SI7021.h>
 
-// Configuración del sensor DHT
-#define DHTPIN 32      // Pin donde está conectado el DHT21
-#define DHTTYPE DHT21  // Tipo de sensor: DHT21 (AM2301)
 
 // Configuración WiFi
 const char* ssid = "";
@@ -16,6 +14,7 @@ const char* mqtt_server = "";
 const int mqtt_port = ;
 const char* mqtt_user = "";
 const char* mqtt_password = "";
+const char* mqtt_id = "";
 
 // Tópicos MQTT
 const char* topic_temp = "";
@@ -27,11 +26,39 @@ BLA BLA BLA
 -----END CERTIFICATE-----
 )EOF";
 
+#define SDA 39
+#define SCL 38
+
+SI7021 sensor;
 WiFiClientSecure espClient;
 PubSubClient client(espClient);
 
-// Inicialización del sensor DHT
-DHT dht(DHTPIN, DHTTYPE);
+// Función para leer sensor
+void handle_root() {
+  int temp = sensor.getCelsiusHundredths();
+  float temperature = temp / 100.0;
+
+  int hum = sensor.getHumidityBasisPoints();
+  float humidity = hum / 100.0;
+
+  Serial.print("Temperatura: ");
+  Serial.print(temperature);  // Mostrar un solo decimal
+  Serial.println(" °C");
+
+  Serial.print("Humedad: ");
+  Serial.print(humidity);  // Mostrar un solo decimal
+  Serial.println(" %");
+
+  // Convertir valores a cadenas
+  char tempStr[8];
+  char humStr[8];
+  dtostrf(temperature, 6, 2, tempStr);
+  dtostrf(humidity, 6, 2, humStr);
+
+  // Publicar datos en los tópicos MQTT
+  client.publish(topic_temp, tempStr);
+  client.publish(topic_hum, humStr);
+}
 
 // Función para conectarse al WiFi
 void setupWiFi() {
@@ -52,10 +79,8 @@ void setupWiFi() {
 void reconnect() {
   while (!client.connected()) {
     Serial.print("Conectando a MQTT...");
-    String clientId = "ESP32_lab_one";
-    clientId += String(random(0xffff), HEX);
-
-    if (client.connect(clientId.c_str(), mqtt_user, mqtt_password)) {
+    client.setKeepAlive(20);
+    if (client.connect(mqtt_id, mqtt_user, mqtt_password)) {
       Serial.println("conectado");
       // Suscríbete a tus topics aquí
       client.subscribe("test/topic");
@@ -68,24 +93,19 @@ void reconnect() {
   }
 }
 
-// Función setup
 void setup() {
   Serial.begin(115200);
-
-  // Inicialización del sensor DHT
-  dht.begin();
+  sensor.begin(SDA, SCL);
 
   // Conexión WiFi
   setupWiFi();
 
   // Configurar certificado
   espClient.setCACert(ca_cert);
-
-
+  client.setKeepAlive(20);
   client.setServer(mqtt_server, mqtt_port);
 }
 
-// Función loop
 void loop() {
   // Conectar al broker MQTT si no está conectado
   if (!client.connected()) {
@@ -93,34 +113,6 @@ void loop() {
   }
 
   client.loop();
-
-  // Leer datos del DHT21
-  float temperature = dht.readTemperature();  // Temperatura en °C
-  float humidity = dht.readHumidity();        // Humedad en %
-
-  // Verificar si las lecturas son válidas
-  if (isnan(temperature) || isnan(humidity)) {
-    Serial.println("Error al leer el sensor DHT21");
-    delay(2000);
-    return;
-  }
-
-  // Convertir valores a cadenas
-  char tempStr[8];
-  char humStr[8];
-  dtostrf(temperature, 6, 2, tempStr);  // Convertir float a string
-  dtostrf(humidity, 6, 2, humStr);
-
-  // Publicar datos en los tópicos MQTT
-  client.publish(topic_temp, tempStr);
-  client.publish(topic_hum, humStr);
-
-  Serial.print("Enviado -> ");
-  Serial.print("Temperatura: ");
-  Serial.print(tempStr);
-  Serial.print(" °C, Humedad: ");
-  Serial.print(humStr);
-  Serial.println(" %");
-
-  delay(1000);  // Enviar datos cada 5 segundos
+  handle_root();
+  delay(1000);
 }
